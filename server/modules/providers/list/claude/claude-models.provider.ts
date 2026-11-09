@@ -1,8 +1,11 @@
 import { readFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
 import { sessionsDb } from '@/modules/database/index.js';
 import type { IProviderModels } from '@/shared/interfaces.js';
 import type {
+  AnyRecord,
   ProviderCurrentActiveModel,
   ProviderModelOption,
   ProviderModelsDefinition,
@@ -10,6 +13,8 @@ import type {
 import {
   buildDefaultProviderCurrentActiveModel,
   isPlaceholderProviderModel,
+  readObjectRecord,
+  readOptionalString,
   stripAnsiSequences,
 } from '@/shared/utils.js';
 
@@ -276,6 +281,51 @@ const readClaudeSessionModelFromJsonl = async (
   return null;
 };
 
+/**
+ * CLI 解析 `default` 模型别名时可能查询的环境变量键，按优先级从高到低排列。
+ * provider 切换器（如 CC Switch）通常不写顶层 `model` 键，而是把模型映射写进
+ * settings.json 的 env 块里，这里逐级兜底。
+ */
+const CLAUDE_DEFAULT_ALIAS_ENV_KEYS = [
+  'ANTHROPIC_MODEL',
+  'ANTHROPIC_DEFAULT_FABLE_MODEL',
+  'ANTHROPIC_DEFAULT_OPUS_MODEL',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+] as const;
+
+/**
+ * 尽力而为地回答「本机 `default` 别名实际会跑哪个模型」，读取来源是
+ * ~/.claude/settings.json：先看顶层 `model` 键，再看 env 块里的别名映射，
+ * 最后兜底 server 进程环境变量。仅用于展示——会话真正运行时仍由 CLI 自行解析别名。
+ */
+const readClaudeConfiguredDefaultModel = async (): Promise<string | null> => {
+  let settingsEnv: AnyRecord | null = null;
+  try {
+    const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
+    const settings = readObjectRecord(JSON.parse(await readFile(settingsPath, 'utf8')));
+    const configured = readOptionalString(settings?.model)?.trim();
+    if (configured && !isPlaceholderProviderModel(configured)) {
+      return configured;
+    }
+    settingsEnv = readObjectRecord(settings?.env);
+  } catch {
+    // settings.json 缺失或格式损坏时，继续走环境变量解析。
+  }
+
+  for (const key of CLAUDE_DEFAULT_ALIAS_ENV_KEYS) {
+    const fromSettings = readOptionalString(settingsEnv?.[key])?.trim();
+    if (fromSettings && !isPlaceholderProviderModel(fromSettings)) {
+      return fromSettings;
+    }
+    const fromProcess = process.env[key]?.trim();
+    if (fromProcess && !isPlaceholderProviderModel(fromProcess)) {
+      return fromProcess;
+    }
+  }
+
+  return null;
+};
+
 export class ClaudeProviderModels implements IProviderModels {
   async getSupportedModels(): Promise<ProviderModelsDefinition> {
     // claude creates a new jsonl file as a separate session for this request.
@@ -289,12 +339,34 @@ export class ClaudeProviderModels implements IProviderModels {
     // const supportedModels = await queryInstance.supportedModels();
     // queryInstance.close();
     // return buildClaudeModelsDefinition(supportedModels);
-    return CLAUDE_PREDEFINED_MODELS;
+    const configuredDefault = await readClaudeConfiguredDefaultModel();
+    if (!configuredDefault) {
+      return CLAUDE_PREDEFINED_MODELS;
+    }
+
+    // 把本机 `default` 别名实际解析出的模型名透出到选择器描述里，
+    // value 保持 'default' 不变，选择/提交逻辑不受影响。
+    return {
+      ...CLAUDE_PREDEFINED_MODELS,
+      OPTIONS: CLAUDE_PREDEFINED_MODELS.OPTIONS.map((option) =>
+        option.value === CLAUDE_PREDEFINED_MODELS.DEFAULT
+          ? {
+              ...option,
+              description: [
+                option.description,
+                `Currently resolves to "${configuredDefault}" from your Claude config.`,
+              ]
+                .filter(Boolean)
+                .join(' '),
+            }
+          : option,
+      ),
+    };
   }
 
   async getCurrentActiveModel(sessionId?: string): Promise<ProviderCurrentActiveModel> {
     if (!sessionId?.trim()) {
-      return buildDefaultProviderCurrentActiveModel(await this.getSupportedModels());
+      return this.buildConfiguredFallbackActiveModel();
     }
 
     try {
@@ -306,9 +378,22 @@ export class ClaudeProviderModels implements IProviderModels {
         return activeModel;
       }
     } catch {
-      // Fall through to the provider default when the session-backed lookup fails.
+      // 会话侧查询失败时，落到配置文件解析出的默认模型。
     }
 
+    return this.buildConfiguredFallbackActiveModel();
+  }
+
+  /**
+   * 与 Codex 适配器读 ~/.codex/config.toml 的先例同构：优先回答
+   * ~/.claude/settings.json 里配置的模型名，未配置时才退回 catalog 默认值，
+   * 让展示面能透出 `default` 别名背后的真实模型。
+   */
+  private async buildConfiguredFallbackActiveModel(): Promise<ProviderCurrentActiveModel> {
+    const configuredDefault = await readClaudeConfiguredDefaultModel();
+    if (configuredDefault && configuredDefault !== CLAUDE_PREDEFINED_MODELS.DEFAULT) {
+      return { model: configuredDefault };
+    }
     return buildDefaultProviderCurrentActiveModel(await this.getSupportedModels());
   }
 }
