@@ -26,6 +26,10 @@ import {
   normalizeImageDescriptors
 } from '@/shared/image-attachments.js';
 import {
+  CC_SWITCH_MODEL_PREFIX,
+  readCcSwitchClaudeProviderEnv
+} from '@/modules/providers/list/claude/claude-cc-switch.provider.js';
+import {
   CLAUDE_PREDEFINED_MODELS,
   CLAUDE_ULTRACODE_EFFORT
 } from '@/modules/providers/list/claude/claude-models.provider.js';
@@ -377,7 +381,8 @@ export function buildClaudeSdkEnv(hostEnv: NodeJS.ProcessEnv = process.env): Nod
   };
 }
 
-function mapCliOptionsToSDK(options: AnyRecord = {}) {
+/** Exported for tests. */
+export function mapCliOptionsToSDK(options: AnyRecord = {}) {
   const { providerSessionId, cwd, toolsSettings, permissionMode, effort, resumeAnchorId, resumeFromScratch } = options;
 
   const sdkOptions: AnyRecord = {};
@@ -431,7 +436,27 @@ function mapCliOptionsToSDK(options: AnyRecord = {}) {
 
   sdkOptions.disallowedTools = settings.disallowedTools || [];
 
-  sdkOptions.model = options.model || CLAUDE_PREDEFINED_MODELS.DEFAULT;
+  // CC Switch 供应商选项的 model 值带 `cc-switch:` 前缀：把该供应商的完整 env
+  // （端点、密钥、各档位模型映射）经 SDK settings 注入——flag settings 层优先级
+  // 高于 ~/.claude/settings.json 的 env 块，效果等于「会话级的 CC Switch 全局
+  // 切换」：只作用于本会话 spawn 的 CLI，不动全局配置，不影响其他会话。
+  // model 回落为 `default` 别名，由 CLI 按注入的 env 解析出目标模型。
+  // 注意：env 含密钥，只在本进程与子 CLI 进程内流转，与 ~/.claude/settings.json
+  // 的明文密钥同属一个信任域，不会进入任何 API 响应或日志。
+  let selectedModel = options.model || CLAUDE_PREDEFINED_MODELS.DEFAULT;
+  if (typeof selectedModel === 'string' && selectedModel.startsWith(CC_SWITCH_MODEL_PREFIX)) {
+    const ccSwitchProviderId = selectedModel.slice(CC_SWITCH_MODEL_PREFIX.length);
+    const ccSwitchEnv = readCcSwitchClaudeProviderEnv(ccSwitchProviderId);
+    if (ccSwitchEnv) {
+      // 后续 applyClaudeEffort(ultracode) 对 settings 做展开合并，env 键不会丢。
+      sdkOptions.settings = { ...(sdkOptions.settings || {}), env: ccSwitchEnv };
+    } else {
+      // 供应商已被从 CC Switch 删除：告警后按当前全局配置（default 别名）运行。
+      console.warn(`[Claude SDK] CC Switch provider "${ccSwitchProviderId}" no longer exists; falling back to the default model.`);
+    }
+    selectedModel = CLAUDE_PREDEFINED_MODELS.DEFAULT;
+  }
+  sdkOptions.model = selectedModel;
 
   applyClaudeEffort(sdkOptions, resolveClaudeEffort(
     sdkOptions.model,

@@ -25,6 +25,8 @@ type ComposerModelMenuProps = {
   modelOptions: ProviderModelOption[];
   onSelectModel: (model: string) => void;
   modelsLoading: boolean;
+  /** 菜单展开时触发:上层借此重新拉取模型目录,让 CC Switch 供应商增删即时可见。 */
+  onModelsMenuOpen?: () => void;
 };
 
 /**
@@ -39,6 +41,7 @@ function ComposerModelMenu({
   modelOptions,
   onSelectModel,
   modelsLoading,
+  onModelsMenuOpen,
 }: ComposerModelMenuProps) {
   const { t } = useTranslation('chat');
   const [isOpen, setIsOpen] = useState(false);
@@ -85,6 +88,10 @@ function ComposerModelMenu({
         type="button"
         onClick={() => {
           updateAnchor();
+          if (!isOpen) {
+            // 即将展开:通知上层重拉目录,CC Switch 侧的供应商增删即时可见。
+            onModelsMenuOpen?.();
+          }
           setIsOpen((current) => !current);
         }}
         className="flex h-8 max-w-20 shrink-0 items-center gap-1 rounded-lg border border-border/60 bg-muted/40 px-2 text-xs font-medium text-foreground transition-colors hover:bg-muted sm:max-w-56"

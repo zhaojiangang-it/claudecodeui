@@ -73,6 +73,8 @@ type ChatComposerProps = {
   availableModelOptions: ProviderModelOption[];
   onSelectModel: (model: string) => void;
   modelsLoading: boolean;
+  /** 透传给 ComposerModelMenu:模型菜单展开时回调,用于实时重拉目录(CC Switch 联动)。 */
+  onModelsMenuOpen?: () => void;
   tokenBudget: Record<string, unknown> | null;
   onShowTokenUsage: () => void;
   slashCommandsCount: number;
@@ -159,6 +161,7 @@ export default function ChatComposer({
   availableModelOptions,
   onSelectModel,
   modelsLoading,
+  onModelsMenuOpen,
   tokenBudget,
   onShowTokenUsage,
   slashCommandsCount,
@@ -524,6 +527,7 @@ export default function ChatComposer({
               modelOptions={availableModelOptions}
               onSelectModel={onSelectModel}
               modelsLoading={modelsLoading}
+              onModelsMenuOpen={onModelsMenuOpen}
             />
 
             <ComposerPermissionMenu

@@ -712,6 +712,24 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
     }));
   }, []);
 
+  /**
+   * 模型菜单展开时重新拉取单个 provider 的目录。CC Switch 供应商目录在服务端
+   * 实时读库,展开时拉取即可让供应商增删立即反映到菜单,无需轮询或手动同步。
+   * ChatInterface 在菜单打开回调里消费。
+   */
+  const refreshProviderModelCatalog = useCallback(async (targetProvider: LLMProvider) => {
+    try {
+      const response = await api.providers.models(targetProvider);
+      const body = (await response.json()) as ProviderModelsApiResponse;
+      const models = body.success ? body.data?.models : undefined;
+      if (models) {
+        applyProviderCatalog(targetProvider, models);
+      }
+    } catch (error) {
+      console.error(`Error refreshing ${targetProvider} models:`, error);
+    }
+  }, [applyProviderCatalog]);
+
   const readModelMutationResponse = useCallback(async (
     response: Response,
   ): Promise<Required<Pick<NonNullable<ProviderModelMutationApiResponse['data']>, 'model' | 'models'>>> => {
@@ -839,6 +857,7 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
     providerModelCatalog,
     providerModelsLoading,
     providerModelActions,
+    refreshProviderModelCatalog,
     selectProviderModel,
     selectProviderEffort,
     resolvePermissionModeForProvider,

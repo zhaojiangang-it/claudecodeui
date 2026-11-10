@@ -119,6 +119,7 @@ function ChatInterface({
     providerModelCatalog,
     providerModelsLoading,
     providerModelActions,
+    refreshProviderModelCatalog,
     selectProviderModel,
     selectProviderEffort,
     resolvePermissionModeForProvider,
@@ -130,6 +131,12 @@ function ChatInterface({
     selectedSession,
     selectedProject,
   });
+
+  // 模型菜单展开时重拉当前 provider 的目录:CC Switch 供应商在服务端实时读库,
+  // 展开即拉取,新增/删除立即可见。
+  const handleModelsMenuOpen = useCallback(() => {
+    void refreshProviderModelCatalog(provider);
+  }, [provider, refreshProviderModelCatalog]);
 
   const {
     chatMessages,
@@ -561,6 +568,7 @@ function ChatInterface({
           availableModelOptions={currentProviderModelOptions}
           onSelectModel={handleSelectComposerModel}
           modelsLoading={providerModelsLoading}
+          onModelsMenuOpen={handleModelsMenuOpen}
           tokenBudget={tokenBudget}
           onShowTokenUsage={showCostModal}
           isEditingSentMessage={Boolean(editingAnchorId)}

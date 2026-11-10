@@ -3,6 +3,11 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { sessionsDb } from '@/modules/database/index.js';
+import {
+  CC_SWITCH_MODEL_PREFIX,
+  listCcSwitchClaudeProviders,
+} from '@/modules/providers/list/claude/claude-cc-switch.provider.js';
+import type { CcSwitchClaudeProviderEntry } from '@/modules/providers/list/claude/claude-cc-switch.provider.js';
 import type { IProviderModels } from '@/shared/interfaces.js';
 import type {
   AnyRecord,
@@ -326,6 +331,41 @@ const readClaudeConfiguredDefaultModel = async (): Promise<string | null> => {
   return null;
 };
 
+/**
+ * 存在 CC Switch 供应商时的目录：只保留 Default 选项 + 每个供应商一个选项。
+ * 官方预设(fable/opus/sonnet…)在中转端点场景选了就会报错，因此整体隐藏；
+ * Default 语义不变——跟随 CC Switch 当前全局激活的供应商。
+ * 供应商选项复用 Default 的 effort 定义，保持推理力度 UI 体验一致。
+ */
+const buildCcSwitchCatalogOptions = (
+  entries: CcSwitchClaudeProviderEntry[],
+): ProviderModelOption[] => {
+  const defaultOption = CLAUDE_PREDEFINED_MODELS.OPTIONS.find(
+    (option) => option.value === CLAUDE_PREDEFINED_MODELS.DEFAULT,
+  );
+  // 静态目录里 DEFAULT 必然存在；防御性兜底，避免目录为空导致选择器不可用。
+  if (!defaultOption) {
+    return CLAUDE_PREDEFINED_MODELS.OPTIONS;
+  }
+
+  return [
+    defaultOption,
+    ...entries.map((entry) => ({
+      // value 带 cc-switch: 前缀，claude-runtime.provider.ts 据此做会话级注入。
+      value: `${CC_SWITCH_MODEL_PREFIX}${entry.id}`,
+      label: entry.name,
+      description:
+        [
+          entry.displayName ? `Model: ${entry.displayName}` : null,
+          entry.isCurrent ? 'Currently active in CC Switch' : null,
+        ]
+          .filter(Boolean)
+          .join(' · ') || 'CC Switch provider',
+      effort: defaultOption.effort,
+    })),
+  ];
+};
+
 export class ClaudeProviderModels implements IProviderModels {
   async getSupportedModels(): Promise<ProviderModelsDefinition> {
     // claude creates a new jsonl file as a separate session for this request.
@@ -340,15 +380,24 @@ export class ClaudeProviderModels implements IProviderModels {
     // queryInstance.close();
     // return buildClaudeModelsDefinition(supportedModels);
     const configuredDefault = await readClaudeConfiguredDefaultModel();
+    // 每次请求实时读 CC Switch 数据库（无缓存）：供应商增删立即反映到目录。
+    const ccSwitchEntries = listCcSwitchClaudeProviders();
+    const baseOptions = ccSwitchEntries.length > 0
+      ? buildCcSwitchCatalogOptions(ccSwitchEntries)
+      : CLAUDE_PREDEFINED_MODELS.OPTIONS;
+
     if (!configuredDefault) {
-      return CLAUDE_PREDEFINED_MODELS;
+      // 无 CC Switch 且无本机配置时原样返回共享对象，保持既有引用语义。
+      return baseOptions === CLAUDE_PREDEFINED_MODELS.OPTIONS
+        ? CLAUDE_PREDEFINED_MODELS
+        : { ...CLAUDE_PREDEFINED_MODELS, OPTIONS: baseOptions };
     }
 
     // 把本机 `default` 别名实际解析出的模型名透出到选择器描述里，
     // value 保持 'default' 不变，选择/提交逻辑不受影响。
     return {
       ...CLAUDE_PREDEFINED_MODELS,
-      OPTIONS: CLAUDE_PREDEFINED_MODELS.OPTIONS.map((option) =>
+      OPTIONS: baseOptions.map((option) =>
         option.value === CLAUDE_PREDEFINED_MODELS.DEFAULT
           ? {
               ...option,
