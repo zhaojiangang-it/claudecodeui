@@ -1,5 +1,7 @@
 # Rose 定制版部署与上游同步手册
 
+> **⚠️ 状态更新(2026-11-11):定制版已取消。** 本机全局已改装官方 npm 最新版(`npm i -g @cloudcli-ai/cloudcli@latest`,当日为 1.37.8),日常实例跑官方版;本地仓库工作分支回到 `main`(与上游一致)。定制提交全部存档于 `rose` 分支(已推私有 fork),本文手册随分支存档。若将来要恢复定制版:rose 分支 rebase 上游后按第一节重新打包安装即可;在此之前,`/update` 对 cloudcli 的一键更新恢复可用(第四节第 4 条警告不再适用)。
+>
 > 适用对象:本仓库(CloudCLI,原 claudecodeui,AGPL-3.0,上游 github.com/siteboon/claudecodeui)。
 > 维护约定:部署方式、同步流程、踩坑经验有任何变化,直接更新本文件并单独 commit。
 > 首版:2026-11-10(随 CC Switch 联动功能落地时编写)。
